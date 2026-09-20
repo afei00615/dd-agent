@@ -6,13 +6,14 @@ edition = "2021"
 [dependencies]
 async-stream = "0.3"
 async-trait = "0.1"
+dotenvy = "0.15.7"
 eventsource-stream = "0.2"
 futures-util = "0.3"
 reqwest = { version = "0.13", default-features = false, features = ["json", "rustls", "stream"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
-tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+tokio = { version = "1", features = ["macros", "process", "rt-multi-thread", "time"] }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["io-util", "macros", "net", "rt-multi-thread"] }
