@@ -12,4 +12,4 @@ mod tools;
 pub use client::{ChatCompletionApi, ChatStream, OpenAiCompatibleClient};
 pub use error::{LlmError, Result};
 pub use types::*;
-pub use tools::{load_tools,run_shell};
+pub use tools::{load_tools,run_power_shell};

@@ -1,7 +1,7 @@
 use std::io::{self, Write};
 
 use dd_agent::{ChatCompletionApi, 
-    LlmConfig, Message, OpenAiCompatibleClient, load_tools,run_shell};
+    LlmConfig, Message, OpenAiCompatibleClient, load_tools,run_power_shell};
 use serde_json::json;
 
 #[tokio::main]
@@ -24,7 +24,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut messages = vec![Message::system(
         "你是本地agent助手，做危险的操作时，需要获取用户的授权",
     )];
-    let tools = load_tools();
     
     loop {
         io::stdout().flush().unwrap();
@@ -53,7 +52,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         for call in assistant.tool_calls {
                             let result = match call.function.name.as_str() {
                                 "run_shell" => {
-                                    match run_shell(
+                                    match run_power_shell(
                                         &call.function.arguments,
                                         std::path::Path::new(r"E:\download")
                                     ).await {

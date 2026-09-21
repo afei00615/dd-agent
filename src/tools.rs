@@ -1,87 +1,107 @@
 use std::{path::Path, time::Duration};
 
-use serde::Deserialize;
-use serde_json::{json,Value,Deserializer};
-use tokio::{process::Command, time::{Timeout, timeout}};
+use serde::{Deserialize, Serialize};
+use serde_json::{Value, json};
+use tokio::{process::Command, time::{timeout}};
 
-pub fn load_tools() -> Vec<Value> {
-    vec![shell_tool()]
+
+
+/// 大模型参数
+#[derive(Debug,Deserialize)]
+pub struct ShellArgs {
+    pub command :String
 }
 
-fn shell_tool() -> Value {
-    json!({
-        "type": "function",
-        "function": {
-            "name": "run_shell",
-            "description": "在受限的本地工作目录执行 PowerShell 或 Bash 命令",
-            "strict": true,
-            "parameters": {
+#[derive(Debug,Serialize)]
+#[serde(rename_all="lowercase")]
+pub enum ToolType {
+    // 函数调用
+    Function
+}
+
+#[derive(Debug,Serialize)]
+pub struct ToolDefinition {
+    #[serde(rename="type")]
+    pub tool_type : ToolType,
+    pub function: FunctionDefinition,
+
+}
+
+#[derive(Debug,Serialize)]
+pub struct FunctionDefinition {
+    pub name : String,
+    pub description : String,
+    pub strict : bool,
+    /**
+     * {
                 "type": "object",
                 "properties": {
-                    "shell": {
-                        "type": "string",
-                        "enum": ["powershell", "bash"],
-                        "description": "要使用的命令解释器"
-                    },
                     "command": {
                         "type": "string",
                         "description": "要执行的命令"
                     }
                 },
                 "required": [
-                    "shell",
                     "command"
                 ],
                 "additionalProperties": false
             }
-        }
-    })
+     */
+    pub parameters : Value,
+    
+}
+/// 策略判定
+pub enum PolicyDecision {
+    Allow,
+    RequestApproval{reason:String},
+    Deny {reason : String}
 }
 
-#[derive(Debug,Deserialize)]
-struct ShellArgs {
-    // dir:String,
-    shell: ShellKind,
-    command: String,
-}
 
-#[derive(Debug,Deserialize)]
-#[serde(rename_all="lowercase")]
-enum ShellKind {
-    PowerShell,
-    Bash,    
-}
-
-pub async fn run_shell(arguments : &str,
-    workspace: &Path) -> Result<String,Box<dyn std::error::Error>> {
-    let args: ShellArgs = serde_json::from_str(arguments)?;
-    if args.command.len() > 4096 {
-        return Err("太长了".into());
-    }
-    // 授权 TODO
-    // authorize_command(&args)?;
-    let mut command = match args.shell {
-        ShellKind::PowerShell => {
-            let mut command = Command::new("pwsh.exe");
-            command.args([
-                "-NoProfile",
-                "-NonInteractive",
-                "-Command",
-                &args.command,
-            ]);
-            command
-        }
-        ShellKind::Bash => {
-            let mut command = Command::new("bash");
-            command.args(["-lc",&args.command]);
-            command
-        }
+pub fn load_tools() -> Vec<Value> {
+    let power_shell_tools = ToolDefinition {
+        tool_type : ToolType::Function,
+        function : FunctionDefinition { 
+            name: String::from("run_shell"), 
+            description: String::from("在受限的本地工作目录执行 PowerShell"), 
+            strict: true, 
+            parameters: json!(
+            {
+                "type": "object",
+                "properties": {
+                    "command": {
+                        "type": "string",
+                        "description": "要执行的命令"
+                    }
+                },
+                "required": [
+                    "command"
+                ],
+                "additionalProperties": false
+            }
+            ) }
     };
+    vec![json!(power_shell_tools)]
+
+}
+
+pub async  fn run_power_shell(args : &str,workspace: &Path) ->Result<String,Box<dyn std::error::Error>> {
+    let args :ShellArgs = serde_json::from_str(args)?;
+    if args.command.len() > 4096 {
+        return Err("命令太长".into());
+    }
+
+    let mut command = Command::new("pwsh.exe");
+    command.args([
+        "-NoProfile",
+        "-NonInteractive",
+        "-Command",
+        &args.command,
+    ]);
     command.current_dir(workspace);
     command.kill_on_drop(true);
-    println!("run command:{:?}",command);
-    let output = timeout(
-        Duration::from_secs(30), command.output()).await.map_err(|_| "命令执行超时")??;
+
+    let output = timeout(Duration::from_secs(40), command.output()).await.map_err(|_|"命令超时")??;
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
     Ok(json!({
@@ -90,6 +110,26 @@ pub async fn run_shell(arguments : &str,
         "stdout": truncate(&stdout, 16_000),
         "stderr": truncate(&stderr, 16_000)
     }).to_string())
+}
+
+fn check_power_shell(command : &str) -> PolicyDecision {
+    let cmd = command.trim().to_lowercase();
+    let denied = [
+        "invoke-expression",
+        "iex ",
+        "-encodedcommand",
+        "set-executionpolicy",
+        "add-mppreference",
+        "clear-disk",
+        "format-volume",
+        "remove-partition",
+    ];
+    if let Some(pattern) = denied.iter().find(|pattern| cmd.contains(*pattern)) {
+        return PolicyDecision::Deny {
+            reason: format!("command contains denied pattern: {pattern}"),
+        };
+    }
+    PolicyDecision::Allow
 }
 
 fn truncate(text: &str, max_chars: usize) -> String {
